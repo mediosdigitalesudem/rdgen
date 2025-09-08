@@ -144,6 +144,7 @@ jobs:
       - name: Install imagemagick and potrace and nasm and and
         shell: bash
         run: |
+          brew uninstall cmake || true
           brew install imagemagick potrace nasm cmake gcc wget ninja
           echo "$(brew --prefix imagemagick)/bin" >> $GITHUB_PATH
 
