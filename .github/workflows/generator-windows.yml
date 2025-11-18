@@ -623,7 +623,9 @@ jobs:
           pushd ./res/msi
           python preprocess.py --app-name "$myappname" --arp -d ../../rustdesk
           nuget restore msi.sln
-          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
+          # AQUI ESTA EL CAMBIO: Se agregan -p:Product y -p:RegKeyRoot
+          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 -p:Product="$myappname" -p:RegKeyRoot="$myappname"
+          
           cp ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-latest.msi
           mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk.msi
           sha256sum ../../SignOutput/rustdesk.msi
