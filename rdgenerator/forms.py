@@ -1,12 +1,30 @@
 from django import forms
 from PIL import Image
+import requests
+
+def get_rustdesk_versions():
+    versions = [('master', 'nightly')]
+    try:
+        response = requests.get('https://api.github.com/repos/rustdesk/rustdesk/tags')
+        response.raise_for_status()
+        tags = response.json()
+        for tag in tags:
+            versions.append((tag['name'], tag['name']))
+    except (requests.exceptions.RequestException, KeyError):
+        # Fallback to a static list if the API call fails
+        versions.extend([('1.4.1', '1.4.1'), ('1.4.0', '1.4.0'), ('1.3.9', '1.3.9'), ('1.3.8', '1.3.8'), ('1.3.7', '1.3.7'), ('1.3.6', '1.3.6'), ('1.3.5', '1.3.5'), ('1.3.4', '1.3.4'), ('1.3.3', '1.3.3')])
+    return versions
 
 class GenerateForm(forms.Form):
     #Platform
     platform = forms.ChoiceField(choices=[('windows','Windows'),('linux','Linux (currently unavailable)'),('android','Android'),('macos','macOS')], initial='windows')
-    version = forms.ChoiceField(choices=[('master','nightly'),('1.4.1','1.4.1'),('1.4.0','1.4.0'),('1.3.9','1.3.9'),('1.3.8','1.3.8'),('1.3.7','1.3.7'),('1.3.6','1.3.6'),('1.3.5','1.3.5'),('1.3.4','1.3.4'),('1.3.3','1.3.3')], initial='1.4.1')
+    version = forms.ChoiceField(choices=[], initial='1.4.1')
     help_text="'master' is the development version (nightly build) with the latest features but may be less stable"
     delayFix = forms.BooleanField(initial=True, required=False)
+
+    def __init__(self, *args, **kwargs):
+        super(GenerateForm, self).__init__(*args, **kwargs)
+        self.fields['version'].choices = get_rustdesk_versions()
 
     #General
     exename = forms.CharField(label="Name for EXE file", required=True)
