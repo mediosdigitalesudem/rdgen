@@ -618,7 +618,6 @@ jobs:
         run: |
           # --- 1. Preparación ---
           $rawName = "${{ inputs.appname }}"
-          # Limpieza estricta
           $safeName = $rawName -replace '[^a-zA-Z0-9]',''
           if ([string]::IsNullOrWhiteSpace($safeName)) { $safeName = "RustDeskClient" }
           
@@ -627,7 +626,6 @@ jobs:
 
           $manufacturer = "${{ fromJson(inputs.extras).compname }}"
           
-          # Validar versión
           $version = "${{ env.VERSION }}"
           if ($version -notmatch "^\d+\.\d+\.\d+$") { $version = "1.0.0" }
           
@@ -636,32 +634,30 @@ jobs:
           $destExe = "rustdesk/$safeName.exe"
           
           if (Test-Path -LiteralPath $srcExe) {
-              # SOLUCION AQUI: Solo copiamos si el nombre cambió
               if ($srcExe -ne $destExe) {
                   Copy-Item -LiteralPath $srcExe -Destination $destExe -Force
                   Write-Host "Renombrado/Copiado: $srcExe -> $destExe"
               } else {
-                  Write-Host "El nombre ya es seguro, se usa el original: $srcExe"
+                  Write-Host "El nombre ya es seguro, se usa el original."
               }
           } else {
               Write-Error "FATAL: No existe el archivo $srcExe"
               exit 1
           }
 
-          # --- 3. Preprocesamiento WiX ---
+          # --- 3. Preprocesamiento y Compilación ---
           Push-Location ./res/msi
           
           try {
             python preprocess.py --app-name "$safeName" --arp -d ../../rustdesk
             if ($LASTEXITCODE -ne 0) { throw "Python script failed" }
           } catch {
-            Write-Error "FATAL: preprocess.py falló. Verifica si el .exe es válido (Side-by-Side error)."
+            Write-Error "FATAL: preprocess.py falló."
             exit 1
           }
 
           nuget restore msi.sln
           
-          # --- 4. Compilación ---
           $buildDir = (Resolve-Path "..\..\rustdesk").Path
           $date = Get-Date -Format "yyyy-MM-dd"
           $upgradeCode = [guid]::NewGuid().ToString()
@@ -683,18 +679,26 @@ jobs:
               exit 1
           }
 
+          # --- 4. SALIR AL DIRECTORIO RAIZ ANTES DE COPIAR ---
+          # Esto soluciona el error de 'Could not find part of the path'
           Pop-Location
-          
-          # --- 5. Resultado ---
+          Write-Host "Regresamos a la raiz: $(Get-Location)"
+
+          # --- 5. Verificar y Mover (Usando rutas desde la raiz) ---
           $msiBuiltPath = "./res/msi/Package/bin/x64/Release/en-us/Package.msi"
+          $targetDir = "./SignOutput"
+
+          # Aseguramos que SignOutput exista
+          if (!(Test-Path $targetDir)) { New-Item -ItemType Directory -Path $targetDir -Force }
           
           if (Test-Path $msiBuiltPath) {
-              Write-Host "MSI generado correctamente."
-              Copy-Item $msiBuiltPath "../../SignOutput/rustdesk-latest.msi" -Force
-              Move-Item $msiBuiltPath "../../SignOutput/rustdesk.msi" -Force
-              Get-FileHash "../../SignOutput/rustdesk.msi" -Algorithm SHA256
+              Write-Host "MSI encontrado, procediendo a copiar..."
+              Copy-Item $msiBuiltPath "$targetDir/rustdesk-latest.msi" -Force
+              Move-Item $msiBuiltPath "$targetDir/rustdesk.msi" -Force
+              Get-FileHash "$targetDir/rustdesk.msi" -Algorithm SHA256
+              Write-Host "MSI movido exitosamente a SignOutput."
           } else {
-              Write-Error "El archivo MSI no se generó."
+              Write-Error "FATAL: El archivo MSI no aparece en $msiBuiltPath"
               exit 1
           }
 
