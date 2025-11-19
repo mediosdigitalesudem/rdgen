@@ -443,10 +443,8 @@ jobs:
         if: ${{ fromJson(inputs.extras).runasadmin == 'true' }}
         shell: bash
         run: |
-          sed -i '/<\/compatibility>/a \
-                <security> \
-                  <requestedExecutionLevel level="requireAdministrator" uiAccess="false"/> \
-                </security>' ./flutter/windows/runner/runner.exe.manifest
+          # Solucion Segura: Reemplazar el nivel existente en lugar de insertar bloques invalidos
+          sed -i 's|level="asInvoker"|level="requireAdministrator"|g' ./flutter/windows/runner/runner.exe.manifest
           
 
       - name: Report Status
