@@ -615,52 +615,79 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build msi
-        continue-on-error: true
         if: env.UPLOAD_ARTIFACT == 'true'
         shell: pwsh
         run: |
-          # 1. Preparar nombres y rutas
-          $appname = "${{ inputs.appname }}"
-          $myappname = $appname -replace '\s','_'
-          $appnameLower = $myappname.ToLower()
+          # --- 1. Preparación de Nombres ---
+          $rawName = "${{ inputs.appname }}"
+          # Crear un ID seguro para WiX (Solo letras, números y guiones bajos)
+          $safeName = $rawName -replace '[^a-zA-Z0-9]','_'
+          $displayName = $rawName
+          
+          Write-Host "Nombre Original: $rawName"
+          Write-Host "ID Seguro (Internal): $safeName"
+          
           $manufacturer = "${{ fromJson(inputs.extras).compname }}"
           
-          # Validar versión (MSI requiere X.X.X)
+          # Validar versión (MSI requiere formato X.X.X estricto)
           $version = "${{ env.VERSION }}"
-          if ($version -match "[a-zA-Z]") { $version = "1.0.0" } # Fallback si la versión es 'nightly' o texto
+          if ($version -notmatch "^\d+\.\d+\.\d+$") { 
+              Write-Host "Version '$version' no es X.X.X, usando fallback 1.0.0"
+              $version = "1.0.0" 
+          }
           
-          # 2. Copiar el ejecutable con el nombre interno correcto para que WiX lo encuentre
-          Copy-Item "rustdesk/${{ inputs.appname }}.exe" "rustdesk/${myappname}.exe" -ErrorAction SilentlyContinue
+          # --- 2. Preparar ejecutable fuente ---
+          # El paso anterior generó el exe con el nombre original (posiblemente con espacios)
+          $srcExe = "rustdesk/$rawName.exe"
+          $destExe = "rustdesk/$safeName.exe"
           
-          # 3. Preparar entorno de compilación
+          if (Test-Path -LiteralPath $srcExe) {
+              # Copiamos el exe con el nombre seguro para que preprocess.py lo encuentre
+              Copy-Item -LiteralPath $srcExe -Destination $destExe -Force
+              Write-Host "Ejecutable base preparado en: $destExe"
+          } else {
+              Write-Error "FATAL: No se encuentra el ejecutable en $srcExe"
+              exit 1
+          }
+
+          # --- 3. Configuración de WiX ---
           Push-Location ./res/msi
-          python preprocess.py --app-name "$myappname" --arp -d ../../rustdesk
+          
+          # Ejecutamos el preprocesador apuntando al nombre seguro
+          python preprocess.py --app-name "$safeName" --arp -d ../../rustdesk
           nuget restore msi.sln
           
-          # 4. Calcular variables dinámicas faltantes
+          # Calcular rutas y variables dinámicas
           $buildDir = (Resolve-Path "..\..\rustdesk").Path
           $date = Get-Date -Format "yyyy-MM-dd"
-          # Generar un GUID único para UpgradeCode para evitar conflictos de instalación
           $upgradeCode = [guid]::NewGuid().ToString()
           
-          # 5. Construir la cadena de constantes para WiX
-          # IMPORTANTE: Aquí definimos todas las variables que dieron error
-          $constants = "Product=$myappname;ProductLower=$appnameLower;RegKeyRoot=$myappname;Version=$version;Manufacturer=$manufacturer;Description=$appname Remote Desktop;UpgradeCode=$upgradeCode;BuildDir=$buildDir;BuildDate=$date"
+          # Definir constantes. NOTA: Product y RegKeyRoot usan $safeName (sin espacios)
+          $constants = "Product=$safeName;ProductLower=$safeName.ToLower();RegKeyRoot=$safeName;Version=$version;Manufacturer=$manufacturer;Description=$displayName;UpgradeCode=$upgradeCode;BuildDir=$buildDir;BuildDate=$date"
           
           Write-Host "Compilando MSI con constantes: $constants"
           
-          # 6. Ejecutar MSBuild inyectando las constantes
-          msbuild msi.sln /p:Configuration=Release /p:Platform=x64 /p:TargetVersion=Windows10 /p:DefineConstants="$constants"
+          # --- 4. Compilación ---
+          # Eliminamos continue-on-error implícitamente para que falle si hay error
+          msbuild msi.sln /p:Configuration=Release /p:Platform=x64 /p:TargetVersion=Windows10 /p:DefineConstants="$constants" -verbosity:minimal
           
+          if ($LASTEXITCODE -ne 0) {
+              Write-Error "Error crítico durante la compilación de MSBuild."
+              exit 1
+          }
+
           Pop-Location
           
-          # 7. Mover y validar los archivos resultantes
-          if (Test-Path "./res/msi/Package/bin/x64/Release/en-us/Package.msi") {
-              Copy-Item "./res/msi/Package/bin/x64/Release/en-us/Package.msi" "../../SignOutput/rustdesk-latest.msi" -Force
-              Move-Item "./res/msi/Package/bin/x64/Release/en-us/Package.msi" "../../SignOutput/rustdesk.msi" -Force
+          # --- 5. Verificación y Salida ---
+          $msiBuiltPath = "./res/msi/Package/bin/x64/Release/en-us/Package.msi"
+          
+          if (Test-Path $msiBuiltPath) {
+              Write-Host "MSI generado correctamente."
+              Copy-Item $msiBuiltPath "../../SignOutput/rustdesk-latest.msi" -Force
+              Move-Item $msiBuiltPath "../../SignOutput/rustdesk.msi" -Force
               Get-FileHash "../../SignOutput/rustdesk.msi" -Algorithm SHA256
           } else {
-              Write-Error "El archivo MSI no se generó correctamente."
+              Write-Error "FATAL: El archivo MSI no se generó en la ruta esperada."
               exit 1
           }
 
