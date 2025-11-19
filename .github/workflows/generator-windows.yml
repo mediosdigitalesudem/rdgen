@@ -617,18 +617,52 @@ jobs:
       - name: Build msi
         continue-on-error: true
         if: env.UPLOAD_ARTIFACT == 'true'
+        shell: pwsh
         run: |
-          $myappname = "${{ inputs.appname }}" -replace '\s','_'
-          cp "rustdesk/${{ inputs.appname }}.exe" "rustdesk/${myappname}.exe" -ErrorAction SilentlyContinue
-          pushd ./res/msi
+          # 1. Preparar nombres y rutas
+          $appname = "${{ inputs.appname }}"
+          $myappname = $appname -replace '\s','_'
+          $appnameLower = $myappname.ToLower()
+          $manufacturer = "${{ fromJson(inputs.extras).compname }}"
+          
+          # Validar versión (MSI requiere X.X.X)
+          $version = "${{ env.VERSION }}"
+          if ($version -match "[a-zA-Z]") { $version = "1.0.0" } # Fallback si la versión es 'nightly' o texto
+          
+          # 2. Copiar el ejecutable con el nombre interno correcto para que WiX lo encuentre
+          Copy-Item "rustdesk/${{ inputs.appname }}.exe" "rustdesk/${myappname}.exe" -ErrorAction SilentlyContinue
+          
+          # 3. Preparar entorno de compilación
+          Push-Location ./res/msi
           python preprocess.py --app-name "$myappname" --arp -d ../../rustdesk
           nuget restore msi.sln
-          # AQUI ESTA EL CAMBIO: Se agregan -p:Product y -p:RegKeyRoot
-          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10 -p:Product="$myappname" -p:RegKeyRoot="$myappname"
           
-          cp ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk-latest.msi
-          mv ./Package/bin/x64/Release/en-us/Package.msi ../../SignOutput/rustdesk.msi
-          sha256sum ../../SignOutput/rustdesk.msi
+          # 4. Calcular variables dinámicas faltantes
+          $buildDir = (Resolve-Path "..\..\rustdesk").Path
+          $date = Get-Date -Format "yyyy-MM-dd"
+          # Generar un GUID único para UpgradeCode para evitar conflictos de instalación
+          $upgradeCode = [guid]::NewGuid().ToString()
+          
+          # 5. Construir la cadena de constantes para WiX
+          # IMPORTANTE: Aquí definimos todas las variables que dieron error
+          $constants = "Product=$myappname;ProductLower=$appnameLower;RegKeyRoot=$myappname;Version=$version;Manufacturer=$manufacturer;Description=$appname Remote Desktop;UpgradeCode=$upgradeCode;BuildDir=$buildDir;BuildDate=$date"
+          
+          Write-Host "Compilando MSI con constantes: $constants"
+          
+          # 6. Ejecutar MSBuild inyectando las constantes
+          msbuild msi.sln /p:Configuration=Release /p:Platform=x64 /p:TargetVersion=Windows10 /p:DefineConstants="$constants"
+          
+          Pop-Location
+          
+          # 7. Mover y validar los archivos resultantes
+          if (Test-Path "./res/msi/Package/bin/x64/Release/en-us/Package.msi") {
+              Copy-Item "./res/msi/Package/bin/x64/Release/en-us/Package.msi" "../../SignOutput/rustdesk-latest.msi" -Force
+              Move-Item "./res/msi/Package/bin/x64/Release/en-us/Package.msi" "../../SignOutput/rustdesk.msi" -Force
+              Get-FileHash "../../SignOutput/rustdesk.msi" -Algorithm SHA256
+          } else {
+              Write-Error "El archivo MSI no se generó correctamente."
+              exit 1
+          }
 
       - name: Report Status
         uses: fjogeleit/http-request-action@v1
