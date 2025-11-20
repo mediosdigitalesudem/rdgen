@@ -234,9 +234,8 @@ jobs:
           git apply allowCustom.diff
 
       - name: Install LLVM and Clang
-        uses: rustdesk-org/install-llvm-action-32bit@master
-        with:
-          version: ${{ env.LLVM_VERSION }}
+        run: choco install llvm --version ${{ env.LLVM_VERSION }} --yes --force
+        shell: pwsh
           
       - name: Report Status
         uses: fjogeleit/http-request-action@v1
