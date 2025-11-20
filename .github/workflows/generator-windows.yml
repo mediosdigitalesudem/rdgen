@@ -250,7 +250,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@v1
         with:
-          toolchain: nightly-2023-10-13-${{ matrix.job.target }} # must use nightly here, because of abi_thiscall feature required
+          toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.job.target }}
           components: "rustfmt"
 
@@ -358,7 +358,6 @@ jobs:
         id: build
         shell: bash
         run: |
-          python3 res/inline-sciter.py
           # Patch sciter x86
           sed -i 's/branch = "dyn"/branch = "dyn_x86"/g' ./Cargo.toml
           cargo build --features inline,vram,hwcodec --release --bins
@@ -432,10 +431,18 @@ jobs:
         run: |
           echo -n "${{ inputs.custom }}" | cat > ./Release/custom.txt
 
+      - name: Build MSI installer
+        shell: bash
+        run: |
+          mv ./Release/rustdesk.exe "./Release/${{ inputs.appname }}.exe"
+          python3 res/msi/preprocess.py -d Release --app-name "${{ inputs.appname }}"
+          /c/Program\ Files/Microsoft\ Visual\ Studio/2022/Enterprise/MSBuild/Current/Bin/MSBuild.exe res/msi/msi.sln /p:Configuration=Release /p:Platform=x86
+          mkdir -p ./SignOutput
+          mv ./res/msi/Package/x86/Release/package.msi "./SignOutput/${{ inputs.filename }}.msi"
+
       - name: Build self-extracted executable
         shell: bash
         run: |
-          mv "./Release/rustdesk.exe" "./Release/${{ inputs.appname }}.exe" || echo "rustdesk.exe"
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
@@ -485,17 +492,47 @@ jobs:
         run: |
           mv ./SignOutput/rustdesk.exe "./SignOutput/${{ inputs.filename }}.exe" || echo "rustdesk"
 
+      - name: zip msi
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ./SignOutput/*.msi -DestinationPath ./SignOutput/unsigned_msi.zip -CompressionLevel Fastest
+
+      - name: sign msi
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [ ! -z "${{ secrets.SIGN_BASE_URL }}" ] && [ ! -z "${{ secrets.SIGN_API_KEY }}" ]; then
+            curl -X POST -F "file=@./SignOutput/unsigned_msi.zip" \
+              -H "X-API-KEY: ${{ secrets.SIGN_API_KEY }}" \
+              -m 900 \
+              "${{ secrets.SIGN_BASE_URL }}/sign/" -o ./SignOutput/signed_msi.zip
+          else
+            echo "Signing skipped - signing URL or API key not configured"
+            cp ./SignOutput/unsigned_msi.zip ./SignOutput/signed_msi.zip
+          fi
+
+      - name: unzip msi
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          Expand-Archive -Path ./SignOutput/signed_msi.zip -DestinationPath ./SignOutput/ -Force
+          Remove-Item ./SignOutput/unsigned_msi.zip
+          Remove-Item ./SignOutput/signed_msi.zip
+
       - name: send file to rdgen server
         if: ${{ fromJson(inputs.extras).rdgen == 'true' }}
         shell: bash
         run: |
           curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.exe" -F "uuid=${{ inputs.uuid }}" ${{ secrets.GENURL }}/save_custom_client
+          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.msi" -F "uuid=${{ inputs.uuid }}" ${{ secrets.GENURL }}/save_custom_client
 
       - name: send file to api server
         if: ${{ fromJson(inputs.extras).rdgen == 'false' }}
         shell: bash
         run: |
           curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.exe" ${{ inputs.apiServer }}/api/save_custom_client
+          curl -i -X POST -H "Content-Type: multipart/form-data" -H "Authorization: Bearer ${{ fromJson(inputs.extras).token }}" -F "file=@./SignOutput/${{ inputs.filename }}.msi" -F "uuid=${{ inputs.uuid }}" ${{ inputs.apiServer }}/api/save_custom_client
 
       - name: Report Status
         uses: fjogeleit/http-request-action@v1
