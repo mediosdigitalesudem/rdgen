@@ -234,8 +234,10 @@ jobs:
           git apply allowCustom.diff
 
       - name: Install LLVM and Clang
-        run: choco install llvm --version ${{ env.LLVM_VERSION }} --yes --force
         shell: pwsh
+        run: |
+          choco install llvm --version ${{ env.LLVM_VERSION }} --yes --force
+          echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" >> $env:GITHUB_ENV
           
       - name: Report Status
         uses: fjogeleit/http-request-action@v1
