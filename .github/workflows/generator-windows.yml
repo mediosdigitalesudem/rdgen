@@ -69,8 +69,13 @@ env:
   FLUTTER_ELINUX_VERSION: "3.16.9"
   TAG_NAME: "${{ inputs.upload-tag }}"
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-  # vcpkg version: 2024.07.12
-  VCPKG_COMMIT_ID: "460551b0ec06be1ba6b918448bf3b0f44add813d"
+  # vcpkg version: 2025.08.27
+  # If we change the `VCPKG COMMIT_ID`, please remember:
+  # 1. Call `$VCPKG_ROOT/vcpkg x-update-baseline` to update the baseline in `vcpkg.json`.
+  #  Or we may face build issue like 
+  #  https://github.com/rustdesk/rustdesk/actions/runs/14414119794/job/40427970174
+  # 2. Update the `VCPKG_COMMIT_ID` in `ci.yml` and `playground.yml`.
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
   VERSION: "${{ fromJson(inputs.extras).version }}"
   NDK_VERSION: "r27c"
   #signing keys env variable checks
@@ -477,6 +482,11 @@ jobs:
           method: 'POST'
           customHeaders: '{"Content-Type": "application/json"}'
           data: '{"uuid": "${{ inputs.uuid }}", "status": "50% complete, this step takes about 5 minutes, be patient."}'
+
+      - name: Patch build.py for target architecture
+        shell: bash
+        run: |
+          sed -i "s|cargo build|cargo build --target ${{ matrix.job.target }}|g" build.py
 
       - name: Build rustdesk
         run: |
