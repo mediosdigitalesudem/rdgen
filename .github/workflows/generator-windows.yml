@@ -487,6 +487,7 @@ jobs:
         shell: bash
         run: |
           sed -i "s|cargo build|cargo build --target ${{ matrix.job.target }}|g" build.py
+          sed -i "s|target/release/|target/${{ matrix.job.target }}/release/|g" build.py
 
       - name: Build rustdesk
         run: |
