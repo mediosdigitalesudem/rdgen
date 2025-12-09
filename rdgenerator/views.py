@@ -348,34 +348,48 @@ def resize_and_encode_icon(imagefile):
  
 #the following is used when accessed from an external source, like the rustdesk api server
 def startgh(request):
-    #print(request)
-    data_ = json.loads(request.body)
-    ####from here run the github action, we need user, repo, access token.
-    url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-'+data_.get('platform')+'.yml/dispatches'  
-    data = {
-        "ref":"master",
-        "inputs":{
-            "server":data_.get('server'),
-            "key":data_.get('key'),
-            "apiServer":data_.get('apiServer'),
-            "custom":data_.get('custom'),
-            "uuid":data_.get('uuid'),
-            "iconlink":data_.get('iconlink'),
-            "logolink":data_.get('logolink'),
-            "appname":data_.get('appname'),
-            "extras":data_.get('extras'),
-            "filename":data_.get('filename')
+    # Security Check
+    api_key = request.headers.get('X-API-Key')
+    if api_key != _settings.RDGEN_API_KEY:
+        return JsonResponse({'error': 'Unauthorized'}, status=401)
+
+    try:
+        data_ = json.loads(request.body)
+        
+        url = 'https://api.github.com/repos/'+_settings.GHUSER+'/'+_settings.REPONAME+'/actions/workflows/generator-'+data_.get('platform')+'.yml/dispatches'  
+        data = {
+            "ref":"master",
+            "inputs":{
+                "server":data_.get('server'),
+                "key":data_.get('key'),
+                "apiServer":data_.get('apiServer'),
+                "custom":data_.get('custom'),
+                "uuid":data_.get('uuid'),
+                "iconlink":data_.get('iconlink'),
+                "logolink":data_.get('logolink'),
+                "appname":data_.get('appname'),
+                "extras":data_.get('extras'),
+                "filename":data_.get('filename')
+            }
+        } 
+        headers = {
+            'Accept':  'application/vnd.github+json',
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer '+_settings.GHBEARER,
+            'X-GitHub-Api-Version': '2022-11-28'
         }
-    } 
-    headers = {
-        'Accept':  'application/vnd.github+json',
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer '+_settings.GHBEARER,
-        'X-GitHub-Api-Version': '2022-11-28'
-    }
-    response = requests.post(url, json=data, headers=headers)
-    print(response)
-    return HttpResponse(status=204)
+        
+        response = requests.post(url, json=data, headers=headers)
+        
+        if response.status_code == 204:
+            return JsonResponse({'status': 'queued', 'uuid': data_.get('uuid')}, status=200)
+        else:
+            print(f"GitHub Error: {response.text}")
+            return JsonResponse({'error': 'GitHub API Failed', 'details': response.text}, status=502)
+            
+    except Exception as e:
+        print(f"Internal Error: {str(e)}")
+        return JsonResponse({'error': str(e)}, status=500)
 
 def save_png(file, uuid, domain, name):
     file_save_path = "png/%s/%s" % (uuid, name)
