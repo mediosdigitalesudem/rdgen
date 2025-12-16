@@ -577,7 +577,12 @@ jobs:
         shell: bash
         if: env.ANDROID_SIGNING_KEY != null
         run: |
-          mv ./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}-signed.apk ./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}.apk
+          if [ -f "./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}-signed.apk" ]; then
+            mv ./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}-signed.apk ./signed-apk/${{ inputs.filename }}-${{ matrix.job.arch }}.apk
+            echo "Successfully renamed signed APK."
+          else
+            echo "Signed APK not found (signing likely failed or skipped). Using original unsigned APK."
+          fi
 
       - name: send file to rdgen server
         if: ${{ fromJson(inputs.extras).rdgen == 'true' }}
